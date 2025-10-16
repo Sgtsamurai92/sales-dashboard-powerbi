@@ -1,0 +1,3 @@
+pandas==2.2.3
+# Optional: enables fast Parquet writes/reads
+pyarrow==18.0.0
