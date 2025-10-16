@@ -96,12 +96,26 @@ def _clean_types_and_values(df: pd.DataFrame) -> pd.DataFrame:
         if len(df) != before:
             logger.info("Dropped %d rows with invalid %s.", before - len(df), date_col)
 
-    # Remove cancellations: InvoiceNo starting with 'C'
+    # Remove cancellations and non-numeric invoice numbers
+    # - Drop rows where InvoiceNo starts with 'C' (explicit cancellations)
+    # - Drop rows where InvoiceNo is not strictly numeric (covers values starting with letters like 'A', blanks, NaN)
     inv_col = next((c for c in df.columns if c.lower() in {"invoiceno", "invoice_no"}), None)
     if inv_col:
+        s = df[inv_col].astype("string").str.strip()
         before = len(df)
-        df = df[~df[inv_col].astype("string").str.upper().str.startswith("C")].copy()
-    logger.info("Removed %d cancellation rows.", before - len(df))
+        mask_c = s.str.upper().str.startswith("C").fillna(False)
+        is_numeric = s.str.fullmatch(r"\d+").fillna(False)
+        mask_non_numeric = ~is_numeric
+        # Count separately without double-counting C* rows in the non-numeric bucket
+        canc_removed = int(mask_c.sum())
+        nonnum_removed = int((mask_non_numeric & ~mask_c).sum())
+        combined = mask_c | mask_non_numeric
+        df = df[~combined].copy()
+        logger.info(
+            "Removed %d cancellation rows and %d rows with non-numeric invoice numbers.",
+            canc_removed,
+            nonnum_removed,
+        )
 
     # Coerce numerics
     qty_col = next((c for c in df.columns if c.lower() == "quantity"), None)
@@ -205,8 +219,8 @@ def _write_outputs(df: pd.DataFrame, out_csv: Path, write_summaries: bool = True
             agg_map["avg_unit_price"] = (price_col, "mean")
         if qty_col:
             agg_map["items_sold"] = (qty_col, "sum")
-        if cols.get("customerid") or cols.get("customer_id"):
-            cust_col = cols.get("customerid", cols.get("customer_id"))
+        cust_col = cols.get("customerid") or cols.get("customer_id")
+        if isinstance(cust_col, str) and cust_col:
             agg_map["unique_customers"] = (cust_col, "nunique")
         by_region = df.groupby([country_col, "year", "month"], dropna=False).agg(**agg_map).reset_index()
         by_region_path = out_csv.parent / "summary_by_region.csv"
@@ -231,8 +245,8 @@ def _write_outputs(df: pd.DataFrame, out_csv: Path, write_summaries: bool = True
         agg_map = {"total_revenue": ("total_price", "sum"), "avg_order_value": ("total_price", "mean")}
         if qty_col:
             agg_map["items_sold"] = (qty_col, "sum")
-        cust_col = cols.get("customerid", cols.get("customer_id"))
-        if cust_col:
+        cust_col = cols.get("customerid") or cols.get("customer_id")
+        if isinstance(cust_col, str) and cust_col:
             agg_map["unique_customers"] = (cust_col, "nunique")
         monthly = (
             df.groupby(["year", "month"], dropna=False).agg(**agg_map).reset_index().sort_values(["year", "month"]) 
