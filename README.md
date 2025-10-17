@@ -1,4 +1,4 @@
-# Sales Dashboard (Power BI)
+# Python ETL
 
 This repository contains a robust Python ETL that cleans and enriches raw sales data and produces analytics-ready CSVs for a Power BI dashboard.
 
